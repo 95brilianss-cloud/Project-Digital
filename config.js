@@ -3,7 +3,7 @@
 
 const CONFIG = {
     // URL Web App dari Google Apps Script (Deploy → Web app)
-    GAS_URL: 'https://script.google.com/macros/s/AKfycbw2hvmrr3GG8MJ55nbycfJ_j9OcLcuVsv0QMhvod4HfBCdgQTJToJ7fGkeWuIGTNRus/exec',
+    GAS_URL: 'https://script.google.com/macros/s/AKfycbx2uj3lIFQFKHV4TEDFN-7H1wK6d6IO6-g80S0HOBgVCYIiAF0z7pfpBRTncPO0geFK/exec',
     
     // Pengaturan App
     MAX_RETRIES: 3,
