@@ -2,7 +2,7 @@
 
 const CONFIG = {
     // 🔴 HAPUS SPASI DI AKHIR! Harus: /exec (tanpa spasi)
-    GAS_URL: 'https://script.google.com/macros/s/AKfycbxXdxqaK5y1fDPx_R0NGhcVC5xDi6Cwsg3BqHJtfihO5_dc5iVOoEIdshBGUl0DMtLR/exec',
+    GAS_URL: 'https://script.google.com/macros/s/AKfycbyUAZdKUPO38jeTkD7iTF2cNWg7_0ocaEOhd3GiLIXxPWOgKQMcpgLFdmlbgGejr_1P/exec',
     
     MAX_RETRIES: 3,
     RETRY_DELAY: 2000,
