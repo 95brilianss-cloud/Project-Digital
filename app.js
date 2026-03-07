@@ -62,6 +62,7 @@ class TurbineApp {
         this.currentParamIndex = 0;
         this.currentParams = [];
         this.paramData = {};
+        this.dbInitialized = false;
         
         this.AREAS_DATA = {
             TURBINE: {
@@ -269,7 +270,9 @@ class TurbineApp {
             const urlEl = document.getElementById('debugApiUrl');
             if (urlEl) urlEl.textContent = CONFIG.GAS_URL.substring(0, 50) + '...';
             
-            await this.initDB();
+            // Inisialisasi DB dengan retry
+            await this.initDBWithRetry();
+            
             this.generateAnomaliId();
             this.updateStatus();
             this.loadAnomaliList();
@@ -285,37 +288,93 @@ class TurbineApp {
                 this.showToast('📴 Mode offline', 'warning');
             });
             
-            Debug.success('App initialized');
+            Debug.success('App initialized successfully');
             
         } catch (error) {
             Debug.error('Init failed: ' + error.message);
-            this.showToast('Error: ' + error.message, 'error');
+            this.showToast('Error inisialisasi: ' + error.message, 'error');
+        }
+    }
+
+    // Inisialisasi DB dengan retry mechanism
+    async initDBWithRetry(maxRetries = 3) {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                await this.initDB();
+                this.dbInitialized = true;
+                Debug.success('IndexedDB initialized successfully');
+                return;
+            } catch (error) {
+                Debug.error(`DB init attempt ${i + 1} failed: ${error.message}`);
+                if (i === maxRetries - 1) {
+                    throw new Error('Gagal menginisialisasi database lokal setelah ' + maxRetries + ' percobaan');
+                }
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
         }
     }
 
     initDB() {
         return new Promise((resolve, reject) => {
+            Debug.info('Opening IndexedDB...');
+            
+            // Cek dukungan IndexedDB
+            if (!window.indexedDB) {
+                reject(new Error('Browser tidak mendukung IndexedDB'));
+                return;
+            }
+
             const request = indexedDB.open(CONFIG.DB_NAME, 1);
             
-            request.onerror = () => {
-                Debug.error('IndexedDB error', request.error);
-                reject(request.error);
+            request.onerror = (event) => {
+                const error = event.target.error;
+                Debug.error('IndexedDB error', error);
+                reject(new Error('Gagal membuka database: ' + (error ? error.message : 'Unknown error')));
             };
             
-            request.onsuccess = () => {
-                this.db = request.result;
-                Debug.info('IndexedDB opened');
+            request.onsuccess = (event) => {
+                this.db = event.target.result;
+                
+                // Handle error saat operasi DB
+                this.db.onerror = (event) => {
+                    Debug.error('Database error', event.target.error);
+                };
+                
+                Debug.info('IndexedDB opened successfully');
                 resolve();
             };
             
             request.onupgradeneeded = (event) => {
+                Debug.info('Upgrading IndexedDB schema...');
                 const db = event.target.result;
-                if (!db.objectStoreNames.contains('pending')) {
-                    db.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
+                
+                // Hapus object store lama jika ada (untuk clean slate)
+                if (db.objectStoreNames.contains('pending')) {
+                    db.deleteObjectStore('pending');
                 }
-                if (!db.objectStoreNames.contains('drafts')) {
-                    db.createObjectStore('drafts', { keyPath: 'key' });
+                if (db.objectStoreNames.contains('drafts')) {
+                    db.deleteObjectStore('drafts');
                 }
+                
+                // Buat object store baru
+                const pendingStore = db.createObjectStore('pending', { 
+                    keyPath: 'id', 
+                    autoIncrement: true 
+                });
+                
+                // Buat index untuk pencarian
+                pendingStore.createIndex('timestamp', 'timestamp', { unique: false });
+                pendingStore.createIndex('type', 'type', { unique: false });
+                
+                const draftsStore = db.createObjectStore('drafts', { keyPath: 'key' });
+                draftsStore.createIndex('timestamp', 'timestamp', { unique: false });
+                
+                Debug.success('IndexedDB schema created');
+            };
+            
+            request.onblocked = (event) => {
+                Debug.error('IndexedDB blocked', 'Database blocked by another tab');
+                reject(new Error('Database diblokir oleh tab lain. Tutup tab lain dan coba lagi.'));
             };
         });
     }
@@ -555,26 +614,38 @@ class TurbineApp {
         this.loadAnomaliList();
     }
 
+    // ================== PERBAIKAN UTAMA: SAVE TO LOCAL ==================
     async saveToApiOrQueue(payload, typeName) {
         this.showLoading(true);
         Debug.info(`Saving ${typeName}...`, payload);
         
         try {
+            // Cek koneksi
             if (navigator.onLine) {
+                Debug.info('Online mode - attempting API sync');
                 const result = await this.syncWithRetry(payload);
                 if (result.success) {
-                    this.showToast(`✅ ${typeName} berhasil disimpan!`, 'success');
+                    this.showToast(`✅ ${typeName} berhasil disimpan ke server!`, 'success');
+                    Debug.success(`${typeName} saved to API`);
                 } else {
-                    throw new Error(result.error);
+                    throw new Error(result.error || 'API Error');
                 }
             } else {
+                Debug.warn('Offline mode - saving to local queue');
                 await this.queueForSync(payload);
                 this.showToast(`📴 ${typeName} disimpan lokal (offline)`, 'warning');
             }
         } catch (error) {
-            Debug.error(`Save failed: ${error.message}`);
-            await this.queueForSync(payload);
-            this.showToast(`⚠️ ${typeName} disimpan lokal`, 'warning');
+            Debug.error(`API save failed: ${error.message}. Falling back to local queue.`);
+            
+            // Fallback ke local queue
+            try {
+                await this.queueForSync(payload);
+                this.showToast(`⚠️ ${typeName} disimpan lokal (akan sync nanti)`, 'warning');
+            } catch (localError) {
+                Debug.error(`CRITICAL: Local save also failed: ${localError.message}`);
+                this.showToast(`❌ Gagal menyimpan: ${localError.message}`, 'error');
+            }
         } finally {
             this.showLoading(false);
             this.updateStatus();
@@ -583,6 +654,67 @@ class TurbineApp {
                 this.navigate('home');
             }
         }
+    }
+
+    // ================== PERBAIKAN UTAMA: QUEUE FOR SYNC ==================
+    async queueForSync(data) {
+        Debug.info('Queueing data for sync...', { type: data.type, timestamp: data.timestamp });
+        
+        // Cek apakah DB sudah diinisialisasi
+        if (!this.dbInitialized || !this.db) {
+            Debug.error('Database not initialized, attempting re-init...');
+            try {
+                await this.initDBWithRetry();
+            } catch (error) {
+                throw new Error('Database tidak tersedia: ' + error.message);
+            }
+        }
+
+        return new Promise((resolve, reject) => {
+            try {
+                const tx = this.db.transaction(['pending'], 'readwrite');
+                const store = tx.objectStore('pending');
+                
+                // Tambahkan metadata
+                const record = {
+                    data: data,
+                    created: new Date().toISOString(),
+                    retries: 0,
+                    lastError: null
+                };
+                
+                const request = store.add(record);
+                
+                request.onsuccess = (event) => {
+                    const id = event.target.result;
+                    Debug.success(`Data queued successfully with ID: ${id}`);
+                    resolve(id);
+                };
+                
+                request.onerror = (event) => {
+                    const error = event.target.error;
+                    Debug.error('Queue add error', error);
+                    reject(new Error('Gagal menambahkan ke antrian: ' + (error ? error.message : 'Unknown error')));
+                };
+                
+                tx.oncomplete = () => {
+                    Debug.info('Transaction completed successfully');
+                };
+                
+                tx.onerror = (event) => {
+                    Debug.error('Transaction error', event.target.error);
+                };
+                
+                tx.onabort = (event) => {
+                    Debug.error('Transaction aborted', event.target.error);
+                    reject(new Error('Transaksi dibatalkan'));
+                };
+                
+            } catch (error) {
+                Debug.error('Exception in queueForSync', error);
+                reject(new Error('Exception: ' + error.message));
+            }
+        });
     }
 
     async syncWithRetry(data, attempt = 1) {
@@ -608,6 +740,7 @@ class TurbineApp {
 
         } catch (error) {
             if (attempt < CONFIG.MAX_RETRIES) {
+                Debug.info(`Retry ${attempt}/${CONFIG.MAX_RETRIES} after ${CONFIG.RETRY_DELAY * attempt}ms`);
                 await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * attempt));
                 return this.syncWithRetry(data, attempt + 1);
             }
@@ -615,28 +748,29 @@ class TurbineApp {
         }
     }
 
-    async queueForSync(data) {
-        return new Promise((resolve, reject) => {
-            const tx = this.db.transaction(['pending'], 'readwrite');
-            const store = tx.objectStore('pending');
-            store.add({ data, created: new Date().toISOString() });
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
-        });
-    }
-
+    // ================== PERBAIKAN: SYNC DATA ==================
     async syncData() {
         if (!navigator.onLine) {
             this.showToast('📴 Tidak ada koneksi!', 'error');
             return;
         }
 
+        if (!this.dbInitialized || !this.db) {
+            Debug.error('Cannot sync - database not initialized');
+            this.showToast('❌ Database belum siap', 'error');
+            return;
+        }
+
+        Debug.info('Starting sync process...');
+        
         const tx = this.db.transaction(['pending'], 'readonly');
         const store = tx.objectStore('pending');
         const request = store.getAll();
         
         request.onsuccess = async () => {
             const pending = request.result;
+            Debug.info(`Found ${pending.length} pending items`);
+            
             if (pending.length === 0) {
                 this.showToast('✅ Tidak ada data pending', 'success');
                 return;
@@ -646,21 +780,41 @@ class TurbineApp {
             
             for (const item of pending) {
                 try {
+                    Debug.info(`Syncing item ${item.id}...`);
                     const result = await this.syncWithRetry(item.data);
+                    
                     if (result.success) {
+                        // Hapus dari queue jika sukses
                         const delTx = this.db.transaction(['pending'], 'readwrite');
                         delTx.objectStore('pending').delete(item.id);
                         success++;
+                        Debug.success(`Item ${item.id} synced and removed from queue`);
                     } else {
+                        // Update retry count
+                        const updateTx = this.db.transaction(['pending'], 'readwrite');
+                        const updateStore = updateTx.objectStore('pending');
+                        item.retries = (item.retries || 0) + 1;
+                        item.lastError = result.error;
+                        item.lastAttempt = new Date().toISOString();
+                        updateStore.put(item);
+                        
                         failed++;
+                        Debug.error(`Item ${item.id} failed: ${result.error}`);
                     }
                 } catch (err) {
                     failed++;
+                    Debug.error(`Exception syncing item ${item.id}: ${err.message}`);
                 }
             }
             
-            this.showToast(`✅ ${success} sukses, ❌ ${failed} gagal`, success > 0 ? 'success' : 'warning');
+            const msg = `✅ ${success} sukses, ❌ ${failed} gagal`;
+            this.showToast(msg, success > 0 ? 'success' : 'warning');
             this.updateStatus();
+        };
+        
+        request.onerror = (event) => {
+            Debug.error('Failed to get pending items', event.target.error);
+            this.showToast('❌ Gagal membaca data pending', 'error');
         };
     }
 
@@ -806,25 +960,50 @@ class TurbineApp {
         `).join('');
     }
 
+    // ================== PERBAIKAN: UPDATE STATUS ==================
     updateStatus() {
         const onlineEl = document.getElementById('onlineStatus');
         if (onlineEl) onlineEl.textContent = navigator.onLine ? '✅ Online' : '❌ Offline';
         
-        const tx = this.db.transaction(['pending'], 'readonly');
-        const store = tx.objectStore('pending');
-        const request = store.count();
-        
-        request.onsuccess = () => {
-            const count = request.result;
+        // Cek DB status
+        if (!this.dbInitialized || !this.db) {
             const pendingEl = document.getElementById('pendingCount');
-            if (pendingEl) pendingEl.textContent = count + ' items';
+            if (pendingEl) pendingEl.textContent = 'DB Error';
             
             const badge = document.getElementById('pendingBadge');
             if (badge) {
-                badge.textContent = count;
-                badge.classList.toggle('hidden', count === 0);
+                badge.textContent = '!';
+                badge.classList.remove('hidden');
+                badge.style.background = 'var(--warning)';
             }
-        };
+            return;
+        }
+        
+        try {
+            const tx = this.db.transaction(['pending'], 'readonly');
+            const store = tx.objectStore('pending');
+            const request = store.count();
+            
+            request.onsuccess = () => {
+                const count = request.result;
+                const pendingEl = document.getElementById('pendingCount');
+                if (pendingEl) pendingEl.textContent = count + ' items';
+                
+                const badge = document.getElementById('pendingBadge');
+                if (badge) {
+                    badge.textContent = count;
+                    badge.classList.toggle('hidden', count === 0);
+                }
+                
+                Debug.info(`Pending count updated: ${count}`);
+            };
+            
+            request.onerror = (event) => {
+                Debug.error('Failed to count pending items', event.target.error);
+            };
+        } catch (error) {
+            Debug.error('Error in updateStatus', error);
+        }
     }
 
     showLoading(show) {
