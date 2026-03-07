@@ -1,5 +1,5 @@
 // ============================================
-// TURBINE LOGSHEET PWA - Main App
+// TURBINE LOGSHEET PWA - Debug Version
 // ============================================
 
 class TurbineApp {
@@ -8,8 +8,9 @@ class TurbineApp {
     this.db = null;
     this.pendingSync = [];
     this.photoData = null;
+    this.debugLogs = [];
     
-    // Data konstanta (dari GAS)
+    // Data konstanta
     this.AREAS_TURBINE = {
       "Steam Inlet Turbine": [
         "MPS Inlet 30-TP-6101 PI-6114 (kg/cm2)",
@@ -210,58 +211,114 @@ class TurbineApp {
     this.init();
   }
 
+  log(type, message, data) {
+    const entry = {
+      time: new Date().toISOString(),
+      type,
+      message,
+      data: data ? JSON.stringify(data).substring(0, 500) : null
+    };
+    this.debugLogs.push(entry);
+    console.log(`[${type}] ${message}`, data || '');
+    
+    // Keep only last 50 logs
+    if (this.debugLogs.length > 50) this.debugLogs.shift();
+  }
+
   async init() {
-    await this.initDB();
-    this.renderLogsheetFields();
-    this.generateAnomaliId();
-    this.updateStatus();
-    this.loadAnomaliList();
-    
-    // Auto sync when online
-    window.addEventListener('online', () => {
-      this.showToast('Koneksi kembali! Menyinkronkan...', 'success');
-      this.syncData();
-    });
-    
-    // Load draft if exists
-    this.loadDraft();
+    try {
+      this.log('INFO', 'Initializing app...');
+      
+      // Check config
+      if (!window.CONFIG || !CONFIG.API_URL) {
+        throw new Error('CONFIG not found! Pastikan config.js sudah diload.');
+      }
+      
+      this.log('INFO', 'API URL:', CONFIG.API_URL);
+      
+      await this.initDB();
+      this.renderLogsheetFields();
+      this.generateAnomaliId();
+      this.updateStatus();
+      this.loadAnomaliList();
+      
+      // Event listeners
+      window.addEventListener('online', () => {
+        this.log('INFO', 'Connection restored');
+        this.showToast('Koneksi kembali! Menyinkronkan...', 'success');
+        this.syncData();
+      });
+      
+      window.addEventListener('offline', () => {
+        this.log('WARN', 'Connection lost');
+        this.showToast('Mode offline', 'warning');
+      });
+      
+      this.loadDraft();
+      this.log('INFO', 'App initialized successfully');
+      
+    } catch (error) {
+      this.log('ERROR', 'Init failed:', error.message);
+      this.showToast('Error init: ' + error.message, 'error');
+    }
   }
 
   initDB() {
     return new Promise((resolve, reject) => {
+      this.log('INFO', 'Opening IndexedDB:', CONFIG.DB_NAME);
+      
       const request = indexedDB.open(CONFIG.DB_NAME, 1);
       
-      request.onerror = () => reject(request.error);
+      request.onerror = () => {
+        this.log('ERROR', 'IndexedDB error:', request.error);
+        reject(request.error);
+      };
+      
       request.onsuccess = () => {
         this.db = request.result;
+        this.log('INFO', 'IndexedDB opened successfully');
         resolve();
       };
       
       request.onupgradeneeded = (event) => {
+        this.log('INFO', 'Creating IndexedDB schema...');
         const db = event.target.result;
-        db.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
-        db.createObjectStore('drafts', { keyPath: 'key' });
+        
+        if (!db.objectStoreNames.contains('pending')) {
+          db.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
+          this.log('INFO', 'Created pending store');
+        }
+        if (!db.objectStoreNames.contains('drafts')) {
+          db.createObjectStore('drafts', { keyPath: 'key' });
+          this.log('INFO', 'Created drafts store');
+        }
       };
     });
   }
 
-  // Navigation
   navigate(page) {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     
-    document.getElementById(`page${page.charAt(0).toUpperCase() + page.slice(1)}`).classList.add('active');
-    event.target.closest('.nav-item').classList.add('active');
+    const pageId = `page${page.charAt(0).toUpperCase() + page.slice(1)}`;
+    document.getElementById(pageId)?.classList.add('active');
+    
+    // Update nav active state
+    const navItems = document.querySelectorAll('.nav-item');
+    const pageIndex = ['home', 'logsheet', 'laporan', 'anomali'].indexOf(page);
+    if (navItems[pageIndex]) navItems[pageIndex].classList.add('active');
     
     if (page === 'home') this.updateStatus();
     if (page === 'anomali') this.loadAnomaliList();
   }
 
-  // Mode switcher
   setMode(mode) {
     this.currentMode = mode;
     document.querySelectorAll('.mode-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.textContent.includes(mode === 'TURBINE' ? 'Turbine' : mode === 'CT' ? 'CT' : 'Oli'));
+      const isActive = (mode === 'TURBINE' && btn.textContent.includes('Turbine')) ||
+                       (mode === 'CT' && btn.textContent.includes('CT')) ||
+                       (mode === 'OLI' && btn.textContent.includes('Oli'));
+      btn.classList.toggle('active', isActive);
     });
     this.renderLogsheetFields();
     this.loadDraft();
@@ -269,6 +326,8 @@ class TurbineApp {
 
   renderLogsheetFields() {
     const container = document.getElementById('logsheetFields');
+    if (!container) return;
+    
     const areas = this.currentMode === 'TURBINE' ? this.AREAS_TURBINE : 
                   this.currentMode === 'CT' ? this.AREAS_CT : this.AREAS_OLI;
     
@@ -285,12 +344,25 @@ class TurbineApp {
     `).join('');
   }
 
-  // Save functions
   async saveLogsheet(e) {
     e.preventDefault();
+    this.log('INFO', 'Saving logsheet...');
+    
     const formData = new FormData(e.target);
     const data = {};
-    formData.forEach((val, key) => { if(val) data[key] = val; });
+    let filledCount = 0;
+    
+    formData.forEach((val, key) => { 
+      if(val) {
+        data[key] = val;
+        filledCount++;
+      }
+    });
+    
+    if (filledCount === 0) {
+      this.showToast('Isi minimal 1 field!', 'warning');
+      return;
+    }
     
     const payload = {
       type: 'LOGSHEET',
@@ -300,11 +372,14 @@ class TurbineApp {
       timestamp: new Date().toISOString()
     };
     
+    this.log('INFO', 'Payload:', payload);
     await this.saveToApiOrQueue(payload, 'Logsheet');
   }
 
   async saveLaporan(e) {
     e.preventDefault();
+    this.log('INFO', 'Saving laporan...');
+    
     const formData = new FormData(e.target);
     
     const payload = {
@@ -315,12 +390,15 @@ class TurbineApp {
       timestamp: new Date().toISOString()
     };
     
+    this.log('INFO', 'Laporan payload:', payload);
     await this.saveToApiOrQueue(payload, 'Laporan');
     e.target.reset();
   }
 
   async saveAnomali(e) {
     e.preventDefault();
+    this.log('INFO', 'Saving anomali...');
+    
     const formData = new FormData(e.target);
     
     const payload = {
@@ -328,45 +406,79 @@ class TurbineApp {
       id: document.getElementById('anomaliId').value,
       area: formData.get('area'),
       description: formData.get('description'),
-      photo: this.photoData,
+      photo: this.photoData || null,
       status: 'OPEN',
       timestamp: new Date().toISOString()
     };
     
+    this.log('INFO', 'Anomali payload:', { ...payload, photo: payload.photo ? '<<BASE64>>' : null });
     await this.saveToApiOrQueue(payload, 'Anomali');
+    
     this.generateAnomaliId();
     this.photoData = null;
-    document.getElementById('photoPreview').classList.add('hidden');
+    const preview = document.getElementById('photoPreview');
+    if (preview) preview.classList.add('hidden');
     e.target.reset();
     this.loadAnomaliList();
   }
 
   async saveToApiOrQueue(payload, typeName) {
     this.showLoading(true);
+    this.log('INFO', `Attempting to save ${typeName}...`);
     
     try {
-      if (navigator.onLine) {
-        const response = await fetch(CONFIG.API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        
-        const result = await response.json();
-        if (result.status === 'success') {
-          this.showToast(`${typeName} berhasil disimpan!`, 'success');
-          this.clearDraft();
-        } else {
-          throw new Error(result.message);
-        }
-      } else {
+      // Check online status
+      if (!navigator.onLine) {
+        this.log('WARN', 'Device is offline, queueing...');
         await this.queueForSync(payload);
         this.showToast(`${typeName} disimpan lokal (offline)`, 'warning');
+        return;
       }
+      
+      // Try API call with timeout
+      this.log('INFO', 'Calling API:', CONFIG.API_URL);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      
+      const response = await fetch(CONFIG.API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      this.log('INFO', 'Response status:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      let result;
+      try {
+        result = await response.json();
+      } catch (e) {
+        throw new Error('Invalid JSON response from server');
+      }
+      
+      this.log('INFO', 'API result:', result);
+      
+      if (result.status === 'success') {
+        this.showToast(`${typeName} berhasil disimpan! ✅`, 'success');
+        this.clearDraft();
+      } else {
+        throw new Error(result.message || 'Unknown API error');
+      }
+      
     } catch (error) {
-      console.error('Save error:', error);
+      this.log('ERROR', 'Save failed:', error.message);
+      console.error('Full error:', error);
+      
+      // Queue for retry
       await this.queueForSync(payload);
-      this.showToast(`${typeName} disimpan lokal (error)`, 'warning');
+      this.showToast(`${typeName} disimpan lokal (error: ${error.message.substring(0, 50)})`, 'warning');
     } finally {
       this.showLoading(false);
       this.updateStatus();
@@ -375,11 +487,36 @@ class TurbineApp {
 
   async queueForSync(data) {
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(['pending'], 'readwrite');
-      const store = tx.objectStore('pending');
-      store.add({ data, created: new Date().toISOString() });
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
+      try {
+        if (!this.db) {
+          throw new Error('Database not initialized');
+        }
+        
+        const tx = this.db.transaction(['pending'], 'readwrite');
+        const store = tx.objectStore('pending');
+        
+        const item = {
+          data: data,
+          created: new Date().toISOString(),
+          retries: 0
+        };
+        
+        const request = store.add(item);
+        
+        request.onsuccess = () => {
+          this.log('INFO', 'Queued for sync, ID:', request.result);
+          resolve();
+        };
+        
+        request.onerror = () => {
+          this.log('ERROR', 'Queue failed:', request.error);
+          reject(request.error);
+        };
+        
+      } catch (error) {
+        this.log('ERROR', 'Queue error:', error.message);
+        reject(error);
+      }
     });
   }
 
@@ -389,40 +526,89 @@ class TurbineApp {
       return;
     }
     
-    this.showLoading(true);
-    const tx = this.db.transaction(['pending'], 'readonly');
-    const store = tx.objectStore('pending');
-    const request = store.getAll();
+    if (!this.db) {
+      this.showToast('Database belum siap!', 'error');
+      return;
+    }
     
-    request.onsuccess = async () => {
-      const pending = request.result;
-      let success = 0, failed = 0;
+    this.showLoading(true);
+    this.log('INFO', 'Starting sync...');
+    
+    try {
+      const tx = this.db.transaction(['pending'], 'readonly');
+      const store = tx.objectStore('pending');
+      const request = store.getAll();
       
-      for (const item of pending) {
-        try {
-          const response = await fetch(CONFIG.API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item.data)
-          });
-          
-          const result = await response.json();
-          if (result.status === 'success') {
-            const delTx = this.db.transaction(['pending'], 'readwrite');
-            delTx.objectStore('pending').delete(item.id);
-            success++;
-          } else {
-            failed++;
-          }
-        } catch (err) {
-          failed++;
+      request.onsuccess = async () => {
+        const pending = request.result;
+        this.log('INFO', `Found ${pending.length} pending items`);
+        
+        if (pending.length === 0) {
+          this.showToast('Tidak ada data pending', 'success');
+          this.showLoading(false);
+          return;
         }
-      }
+        
+        let success = 0, failed = 0;
+        
+        for (const item of pending) {
+          try {
+            this.log('INFO', `Syncing item ${item.id}...`);
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+            
+            const response = await fetch(CONFIG.API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(item.data),
+              signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+              // Delete from queue
+              const delTx = this.db.transaction(['pending'], 'readwrite');
+              delTx.objectStore('pending').delete(item.id);
+              success++;
+              this.log('INFO', `Item ${item.id} synced successfully`);
+            } else {
+              throw new Error(result.message);
+            }
+            
+          } catch (err) {
+            this.log('ERROR', `Sync failed for item ${item.id}:`, err.message);
+            failed++;
+            
+            // Update retry count
+            item.retries = (item.retries || 0) + 1;
+            const updateTx = this.db.transaction(['pending'], 'readwrite');
+            const updateStore = updateTx.objectStore('pending');
+            updateStore.put(item);
+          }
+        }
+        
+        this.showLoading(false);
+        this.showToast(`Sync: ${success} sukses, ${failed} gagal`, success > 0 ? 'success' : 'warning');
+        this.updateStatus();
+      };
       
+      request.onerror = () => {
+        throw request.error;
+      };
+      
+    } catch (error) {
+      this.log('ERROR', 'Sync error:', error.message);
+      this.showToast('Sync error: ' + error.message, 'error');
       this.showLoading(false);
-      this.showToast(`Sync: ${success} sukses, ${failed} gagal`, success > 0 ? 'success' : 'warning');
-      this.updateStatus();
-    };
+    }
   }
 
   // Draft management
@@ -432,6 +618,8 @@ class TurbineApp {
   }
 
   saveDraft() {
+    if (!this.db) return;
+    
     const inputs = document.querySelectorAll('#logsheetForm input');
     const draft = {};
     inputs.forEach(input => { if(input.value) draft[input.name] = input.value; });
@@ -443,10 +631,12 @@ class TurbineApp {
       saved: new Date().toISOString()
     });
     
-    this.showToast('Draft disimpan', 'success');
+    this.log('INFO', 'Draft saved');
   }
 
   loadDraft() {
+    if (!this.db) return;
+    
     const tx = this.db.transaction(['drafts'], 'readonly');
     const store = tx.objectStore('drafts');
     const request = store.get(`draft_${this.currentMode}`);
@@ -454,6 +644,7 @@ class TurbineApp {
     request.onsuccess = () => {
       if (request.result) {
         const draft = request.result.data;
+        this.log('INFO', 'Loading draft:', Object.keys(draft).length, 'fields');
         Object.entries(draft).forEach(([key, val]) => {
           const input = document.querySelector(`input[name="${key}"]`);
           if (input) input.value = val;
@@ -463,6 +654,7 @@ class TurbineApp {
   }
 
   clearDraft() {
+    if (!this.db) return;
     const tx = this.db.transaction(['drafts'], 'readwrite');
     tx.objectStore('drafts').delete(`draft_${this.currentMode}`);
   }
@@ -470,43 +662,77 @@ class TurbineApp {
   // Anomali functions
   generateAnomaliId() {
     const id = 'ANM-' + Date.now().toString(36).toUpperCase();
-    document.getElementById('anomaliId').value = id;
+    const el = document.getElementById('anomaliId');
+    if (el) el.value = id;
   }
 
   previewPhoto(input) {
     if (input.files && input.files[0]) {
+      this.log('INFO', 'Processing photo:', input.files[0].name);
+      
+      // Check size (max 5MB)
+      if (input.files[0].size > 5 * 1024 * 1024) {
+        this.showToast('Foto terlalu besar! Max 5MB', 'error');
+        return;
+      }
+      
       const reader = new FileReader();
       reader.onload = (e) => {
         this.photoData = e.target.result;
         const preview = document.getElementById('photoPreview');
-        preview.src = e.target.result;
-        preview.classList.remove('hidden');
+        if (preview) {
+          preview.src = e.target.result;
+          preview.classList.remove('hidden');
+        }
+        this.log('INFO', 'Photo loaded, size:', this.photoData.length);
+      };
+      reader.onerror = () => {
+        this.log('ERROR', 'Photo read failed');
+        this.showToast('Gagal membaca foto', 'error');
       };
       reader.readAsDataURL(input.files[0]);
     }
   }
 
   async loadAnomaliList() {
+    const container = document.getElementById('anomaliList');
+    if (!container) return;
+    
     try {
-      if (navigator.onLine) {
-        const response = await fetch(`${CONFIG.API_URL}?action=getAnomali`);
-        const data = await response.json();
-        this.renderAnomaliList(data);
-      } else {
-        document.getElementById('anomaliList').innerHTML = `
+      if (!navigator.onLine) {
+        container.innerHTML = `
           <div class="empty-state">
             <div class="empty-icon">📴</div>
             <p>Mode offline - tidak bisa load data</p>
           </div>
         `;
+        return;
       }
+      
+      this.log('INFO', 'Loading anomali list...');
+      const response = await fetch(`${CONFIG.API_URL}?action=getAnomali`);
+      
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      
+      const data = await response.json();
+      this.log('INFO', `Loaded ${data.length} anomali`);
+      this.renderAnomaliList(data);
+      
     } catch (err) {
-      console.error('Load anomali error:', err);
+      this.log('ERROR', 'Load anomali failed:', err.message);
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">❌</div>
+          <p>Error: ${err.message}</p>
+        </div>
+      `;
     }
   }
 
   renderAnomaliList(anomalies) {
     const container = document.getElementById('anomaliList');
+    if (!container) return;
+    
     if (!anomalies || anomalies.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
@@ -521,22 +747,39 @@ class TurbineApp {
       <div class="anomali-item">
         <div class="anomali-header">
           <span class="anomali-id">${a.id}</span>
-          <span class="status-badge status-${(a.status || 'open').toLowerCase().replace(' ', '-')}">
+          <span class="status-badge status-${(a.status || 'OPEN').toLowerCase().replace(/\s+/g, '-')}">
             ${a.status || 'OPEN'}
           </span>
         </div>
-        <div class="anomali-desc">${a.description}</div>
+        <div class="anomali-desc">${this.escapeHtml(a.description)}</div>
         <div class="anomali-meta">
-          <span>👤 ${a.reporter || 'Unknown'}</span>
-          <span>📅 ${new Date(a.timestamp).toLocaleDateString('id-ID')}</span>
+          <span>👤 ${this.escapeHtml(a.reporter || 'Unknown')}</span>
+          <span>📅 ${a.timestamp ? new Date(a.timestamp).toLocaleDateString('id-ID') : '-'}</span>
         </div>
       </div>
     `).join('');
   }
 
+  escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   // UI Helpers
   updateStatus() {
-    document.getElementById('onlineStatus').textContent = navigator.onLine ? 'Yes' : 'No';
+    const onlineStatus = document.getElementById('onlineStatus');
+    const lastSync = document.getElementById('lastSync');
+    const pendingCount = document.getElementById('pendingCount');
+    const pendingBadge = document.getElementById('pendingBadge');
+    
+    if (onlineStatus) onlineStatus.textContent = navigator.onLine ? 'Yes ✅' : 'No ❌';
+    
+    if (!this.db) {
+      if (pendingCount) pendingCount.textContent = 'DB Error';
+      return;
+    }
     
     const tx = this.db.transaction(['pending'], 'readonly');
     const store = tx.objectStore('pending');
@@ -544,35 +787,75 @@ class TurbineApp {
     
     request.onsuccess = () => {
       const count = request.result;
-      document.getElementById('pendingCount').textContent = count;
-      const badge = document.getElementById('pendingBadge');
-      badge.textContent = count;
-      badge.classList.toggle('hidden', count === 0);
+      if (pendingCount) pendingCount.textContent = count;
+      if (pendingBadge) {
+        pendingBadge.textContent = count;
+        pendingBadge.classList.toggle('hidden', count === 0);
+      }
+    };
+    
+    request.onerror = () => {
+      if (pendingCount) pendingCount.textContent = 'Error';
     };
   }
 
   showLoading(show) {
-    document.getElementById('loadingOverlay').classList.toggle('active', show);
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.classList.toggle('active', show);
   }
 
   showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
+    if (!toast) {
+      alert(message); // Fallback
+      return;
+    }
+    
     toast.textContent = message;
     toast.className = `toast ${type} show`;
-    setTimeout(() => toast.classList.remove('show'), 3000);
+    
+    setTimeout(() => {
+      toast.classList.remove('show');
+    }, 3000);
   }
 
   async testConnection() {
-    this.showToast('Testing connection...', 'info');
+    this.showToast('Testing API...', 'info');
+    this.log('INFO', 'Testing connection to:', CONFIG.API_URL);
+    
     try {
-      const response = await fetch(`${CONFIG.API_URL}?action=test`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(`${CONFIG.API_URL}?action=test`, {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      this.log('INFO', 'Test response status:', response.status);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
       const result = await response.json();
-      this.showToast(`API OK: ${result.message}`, 'success');
+      this.log('INFO', 'Test result:', result);
+      
+      this.showToast(`✅ API OK: ${result.message || 'Connected'}`, 'success');
+      
     } catch (err) {
-      this.showToast('API Error: ' + err.message, 'error');
+      this.log('ERROR', 'Test failed:', err.message);
+      this.showToast(`❌ API Error: ${err.message}`, 'error');
     }
+  }
+  
+  // Debug function - call from console: app.showDebug()
+  showDebug() {
+    console.table(this.debugLogs);
+    alert(this.debugLogs.map(l => `[${l.type}] ${l.message}`).join('\n'));
   }
 }
 
-// Initialize app
+// Initialize
 const app = new TurbineApp();
