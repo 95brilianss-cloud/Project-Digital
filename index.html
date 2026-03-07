@@ -1,309 +1,322 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#1a73e8">
-  <title>Turbine Logsheet</title>
-  
-  <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
-  
-  <style>
-    *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-    :root{--primary:#1a73e8;--success:#34a853;--warning:#fbbc04;--danger:#ea4335;--gray:#5f6368;--light:#f8f9fa}
-    body{background:#f0f2f5;color:#202124;line-height:1.6}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1a73e8">
+    <title>Turbine Logsheet</title>
     
-    .app-header{background:var(--primary);color:white;padding:16px;position:fixed;top:0;left:0;right:0;z-index:1000;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
-    .header-content{max-width:600px;margin:0 auto;display:flex;justify-content:space-between;align-items:center}
-    .header-title{font-size:18px;font-weight:600;display:flex;align-items:center;gap:8px}
-    .header-actions{display:flex;gap:12px}
-    .icon-btn{background:rgba(255,255,255,0.2);border:none;color:white;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;transition:all 0.2s}
-    .icon-btn:hover{background:rgba(255,255,255,0.3)}
-    .sync-badge{position:absolute;top:-4px;right:-4px;background:var(--danger);color:white;font-size:10px;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:bold}
-    .relative{position:relative}
-    
-    .main-content{max-width:600px;margin:0 auto;padding:80px 16px 100px;min-height:100vh}
-    
-    .nav-bottom{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid #dadce0;display:flex;justify-content:space-around;padding:8px 0;z-index:1000}
-    .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px;text-decoration:none;color:var(--gray);font-size:12px;transition:all 0.2s;border:none;background:none;cursor:pointer}
-    .nav-item.active{color:var(--primary)}
-    .nav-icon{font-size:24px}
-    
-    .page{display:none;animation:fadeIn 0.3s}
-    .page.active{display:block}
-    @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-    
-    .card{background:white;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:0 1px 2px rgba(0,0,0,0.1)}
-    .card-title{font-size:16px;font-weight:600;margin-bottom:12px;color:#202124;display:flex;align-items:center;gap:8px}
-    
-    .mode-selector{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
-    .mode-btn{flex:1;min-width:100px;padding:12px 16px;border:2px solid #dadce0;background:white;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;transition:all 0.2s;white-space:nowrap}
-    .mode-btn.active{border-color:var(--primary);background:#e8f0fe;color:var(--primary)}
-    
-    .area-section{margin-bottom:20px}
-    .area-title{font-size:14px;font-weight:600;color:var(--gray);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid var(--primary)}
-    
-    .form-group{margin-bottom:12px}
-    .form-label{display:block;font-size:13px;font-weight:500;color:var(--gray);margin-bottom:4px}
-    .form-input{width:100%;padding:12px;border:1px solid #dadce0;border-radius:8px;font-size:14px;transition:all 0.2s}
-    .form-input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(26,115,232,0.1)}
-    
-    .btn{width:100%;padding:14px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;display:flex;align-items:center;justify-content:center;gap:8px}
-    .btn-primary{background:var(--primary);color:white}
-    .btn-primary:hover{background:#1557b0}
-    .btn-primary:disabled{opacity:0.6;cursor:not-allowed}
-    .btn-secondary{background:white;color:var(--primary);border:2px solid var(--primary)}
-    .btn-success{background:var(--success);color:white}
-    
-    .status-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600}
-    .status-open{background:#fce8e8;color:var(--danger)}
-    .status-progress{background:#fef3e8;color:#b06000}
-    .status-closed{background:#e6f4ea;color:var(--success)}
-    
-    .empty-state{text-align:center;padding:40px 20px;color:var(--gray)}
-    .empty-icon{font-size:48px;margin-bottom:12px}
-    
-    .anomali-item{padding:16px;border:1px solid #dadce0;border-radius:8px;margin-bottom:12px;background:white}
-    .anomali-header{display:flex;justify-content:space-between;align-items:start;margin-bottom:8px}
-    .anomali-id{font-family:monospace;font-size:12px;color:var(--gray);background:var(--light);padding:4px 8px;border-radius:4px}
-    .anomali-desc{font-size:14px;color:#202124;margin-bottom:8px;line-height:1.5}
-    .anomali-meta{font-size:12px;color:var(--gray);display:flex;gap:16px}
-    
-    .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(100px);background:#323232;color:white;padding:12px 24px;border-radius:8px;font-size:14px;opacity:0;transition:all 0.3s;z-index:2000;white-space:nowrap}
-    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-    .toast.success{background:var(--success)}
-    .toast.error{background:var(--danger)}
-    .toast.warning{background:var(--warning);color:#000}
-    
-    .loading-overlay{position:fixed;inset:0;background:rgba(255,255,255,0.9);display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;z-index:3000}
-    .loading-overlay.active{display:flex}
-    .spinner{width:48px;height:48px;border:4px solid #dadce0;border-top-color:var(--primary);border-radius:50%;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    
-    .photo-preview{width:100%;height:200px;object-fit:cover;border-radius:8px;margin-bottom:12px;background:var(--light);display:flex;align-items:center;justify-content:center;color:var(--gray)}
-    .photo-input{display:none}
-    .photo-btn{width:100%;padding:40px;border:2px dashed #dadce0;border-radius:8px;background:white;cursor:pointer;text-align:center;color:var(--gray);transition:all 0.2s}
-    .photo-btn:hover{border-color:var(--primary);color:var(--primary)}
-    
-    .stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
-    .stat-card{background:white;padding:16px;border-radius:8px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,0.1)}
-    .stat-value{font-size:24px;font-weight:700;color:var(--primary)}
-    .stat-label{font-size:12px;color:var(--gray);margin-top:4px}
-    
-    .hidden{display:none!important}
-  </style>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Loading -->
-  <div class="loading-overlay" id="loadingOverlay">
-    <div class="spinner"></div>
-    <p>Menyimpan data...</p>
-  </div>
-
-  <!-- Toast -->
-  <div class="toast" id="toast"></div>
-
-  <!-- Header -->
-  <header class="app-header">
-    <div class="header-content">
-      <div class="header-title">
-        <span>⚡</span>
-        <span>Turbine Logsheet</span>
-      </div>
-      <div class="header-actions">
-        <button class="icon-btn relative" onclick="app.syncData()" title="Sync">
-          🔄
-          <span class="sync-badge hidden" id="pendingBadge">0</span>
-        </button>
-        <button class="icon-btn" onclick="app.testConnection()" title="Test API">
-          🔌
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <!-- Main Content -->
-  <main class="main-content">
-    <!-- HOME PAGE -->
-    <div class="page active" id="pageHome">
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value" id="statOpen">0</div>
-          <div class="stat-label">Open</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="statProgress">0</div>
-          <div class="stat-label">Progress</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" id="statClosed">0</div>
-          <div class="stat-label">Closed</div>
-        </div>
-      </div>
-      
-      <div class="card">
-        <div class="card-title">📊 Status Sistem</div>
-        <div id="systemStatus">
-          <p>🟢 Online: <span id="onlineStatus">Yes</span></p>
-          <p>⏱️ Last Sync: <span id="lastSync">Never</span></p>
-          <p>📦 Pending: <span id="pendingCount">0</span> items</p>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">⚡ Quick Actions</div>
-        <button class="btn btn-primary" onclick="app.navigate('logsheet')" style="margin-bottom:8px">
-          📝 Input Logsheet
-        </button>
-        <button class="btn btn-secondary" onclick="app.navigate('anomali')" style="margin-bottom:8px">
-          ⚠️ Buat Anomali
-        </button>
-        <button class="btn btn-secondary" onclick="app.navigate('laporan')">
-          📋 Laporan Shift
-        </button>
-      </div>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <p style="color: var(--text-muted);">Menyimpan data...</p>
     </div>
 
-    <!-- LOGSHEET PAGE -->
-    <div class="page" id="pageLogsheet">
-      <div class="card">
-        <div class="card-title">📝 Input Logsheet</div>
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-content">
+            <div class="header-title">
+                <span>⚡</span>
+                <span>Turbine Logsheet</span>
+            </div>
+            <div class="header-actions">
+                <button class="icon-btn" onclick="app.syncData()" title="Sync">
+                    🔄
+                    <span class="sync-badge hidden" id="pendingBadge">0</span>
+                </button>
+                <button class="icon-btn" onclick="app.testConnection()" title="Test API">
+                    🔌
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- HOME PAGE -->
+        <div class="page active" id="pageHome">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value stat-open" id="statOpen">0</div>
+                    <div class="stat-label">Open</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value stat-progress" id="statProgress">0</div>
+                    <div class="stat-label">Progress</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value stat-closed" id="statClosed">0</div>
+                    <div class="stat-label">Closed</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">📊 Status Sistem</div>
+                <div class="info-box">
+                    <p>🌐 Status: <strong id="onlineStatus">Checking...</strong></p>
+                    <p>⏱️ Last Sync: <strong id="lastSync">Never</strong></p>
+                    <p>📦 Pending: <strong id="pendingCount">0 items</strong></p>
+                </div>
+                
+                <div class="menu-grid">
+                    <div class="menu-btn" onclick="app.showAreaSelection('TURBINE')">
+                        <span class="menu-icon">⚙️</span>
+                        <span class="menu-text">Logsheet Turbine</span>
+                    </div>
+                    <div class="menu-btn" onclick="app.showAreaSelection('CT')">
+                        <span class="menu-icon">🏭</span>
+                        <span class="menu-text">Logsheet CT</span>
+                    </div>
+                    <div class="menu-btn" onclick="app.showAreaSelection('OLI')">
+                        <span class="menu-icon">🛢️</span>
+                        <span class="menu-text">Logsheet Oli</span>
+                    </div>
+                    <div class="menu-btn" onclick="app.navigate('laporan')">
+                        <span class="menu-icon">📝</span>
+                        <span class="menu-text">Laporan Shift</span>
+                    </div>
+                    <div class="menu-btn" onclick="app.navigate('anomali')">
+                        <span class="menu-icon">⚠️</span>
+                        <span class="menu-text">Buat Anomali</span>
+                    </div>
+                    <div class="menu-btn" onclick="app.navigate('dashboard')">
+                        <span class="menu-icon">📈</span>
+                        <span class="menu-text">Dashboard</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debug Panel -->
+            <div class="card" style="border: 1px solid var(--danger);">
+                <div class="card-title" style="color: var(--danger);">🔧 Debug Info</div>
+                <div class="info-box">
+                    <p><strong>API URL:</strong> <span id="debugApiUrl" style="word-break: break-all; font-size: 12px;">Loading...</span></p>
+                    <p><strong>Status:</strong> <span id="debugStatus">-</span></p>
+                    <p><strong>Last Error:</strong> <span id="debugError" style="color: var(--danger);">None</span></p>
+                </div>
+                <button class="debug-toggle" onclick="toggleDebug()">Toggle Debug Log</button>
+                <button class="btn btn-secondary" onclick="testApiConnection()" style="margin-top: 8px;">🧪 Test API Connection</button>
+                <div class="debug-panel" id="debugPanel"></div>
+            </div>
+        </div>
+
+        <!-- AREA SELECTION PAGE -->
+        <div class="page" id="pageAreaSelection">
+            <div class="card">
+                <div class="card-title" id="areaSelectionTitle">📍 Pilih Area</div>
+                <div class="progress-container">
+                    <div class="progress-bar" id="areaProgress" style="width: 0%"></div>
+                </div>
+                <div class="area-list" id="areaList">
+                    <!-- Dynamic areas -->
+                </div>
+                <button class="btn btn-secondary" onclick="app.navigate('home')" style="margin-top: 16px;">← Kembali</button>
+            </div>
+        </div>
+
+        <!-- INPUT PARAMETER PAGE -->
+        <div class="page" id="pageInput">
+            <div class="card">
+                <div class="card-title" id="inputCounter">Parameter 1/10</div>
+                
+                <!-- Progress Bar -->
+                <div class="progress-container" style="margin-bottom: 20px;">
+                    <div class="progress-bar" id="inputProgress" style="width: 0%"></div>
+                </div>
+                
+                <!-- Parameter Card dengan Input Group dan Unit -->
+                <div class="param-card">
+                    <div class="param-name" id="paramName">Loading...</div>
+                    <div class="input-group">
+                        <input type="text" id="paramInput" placeholder="Masukkan nilai" inputmode="decimal" onkeypress="if(event.key==='Enter')app.nextParameter()">
+                        <span class="unit" id="paramUnit">-</span>
+                    </div>
+                    <div class="param-prev" id="paramPrev">Data sebelumnya: -</div>
+                    <div class="error-text" id="paramError">Nilai tidak boleh kosong</div>
+                </div>
+                
+                <!-- Quick Actions -->
+                <div class="quick-actions" id="quickActions">
+                    <button class="quick-btn" onclick="app.setQuickValue('ON')">ON</button>
+                    <button class="quick-btn" onclick="app.setQuickValue('OFF')">OFF</button>
+                    <button class="quick-btn" onclick="app.setQuickValue('A')">A</button>
+                    <button class="quick-btn" onclick="app.setQuickValue('B')">B</button>
+                    <button class="quick-btn" onclick="app.setQuickValue('NORMAL')">NORMAL</button>
+                    <button class="quick-btn" onclick="app.setQuickValue('ERROR')">ERROR</button>
+                </div>
+
+                <button class="btn btn-primary" onclick="app.nextParameter()">
+                    Simpan & Lanjut →
+                </button>
+                <button class="btn btn-secondary" onclick="app.prevParameter()">← Kembali</button>
+            </div>
+        </div>
+
+        <!-- LAPORAN PAGE -->
+        <div class="page" id="pageLaporan">
+            <div class="card">
+                <div class="card-title">📋 Laporan Shift</div>
+                
+                <form id="laporanForm" onsubmit="app.saveLaporan(event)">
+                    <div class="form-group">
+                        <label class="form-label">Shift</label>
+                        <select class="form-input" name="shift" required>
+                            <option value="PAGI">🌅 Pagi (07:00-15:00)</option>
+                            <option value="SORE">🌇 Sore (15:00-23:00)</option>
+                            <option value="MALAM">🌙 Malam (23:00-07:00)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Area</label>
+                        <select class="form-input" name="area" required>
+                            <option value="CT">🏭 Cooling Tower</option>
+                            <option value="TURBINE">⚡ Turbine</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Detail Pekerjaan</label>
+                        <textarea class="form-input" name="detail" rows="4" placeholder="Masukkan detail pekerjaan..." required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">💾 Simpan Laporan</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- ANOMALI PAGE -->
+        <div class="page" id="pageAnomali">
+            <div class="card">
+                <div class="card-title">⚠️ Buat Anomali</div>
+                
+                <form id="anomaliForm" onsubmit="app.saveAnomali(event)">
+                    <div class="form-group">
+                        <label class="form-label">ID Tiket (Auto)</label>
+                        <input type="text" class="form-input" id="anomaliId" readonly style="background: var(--border);">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Area</label>
+                        <select class="form-input" name="area" required>
+                            <option value="TURBINE">⚡ Turbine</option>
+                            <option value="CT">🏭 Cooling Tower</option>
+                            <option value="OLI">🛢️ Oli System</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Deskripsi Anomali</label>
+                        <textarea class="form-input" name="description" rows="4" placeholder="Deskripsikan anomali..." required></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Foto (Optional)</label>
+                        <input type="file" class="photo-input" id="photoInput" accept="image/*" capture="environment" onchange="app.previewPhoto(this)">
+                        <button type="button" class="photo-btn" onclick="document.getElementById('photoInput').click()">
+                            📷 Tap untuk ambil foto
+                        </button>
+                        <img id="photoPreview" class="photo-preview hidden">
+                    </div>
+
+                    <button type="submit" class="btn btn-danger">🚨 Simpan Anomali</button>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-title">📋 Daftar Anomali</div>
+                <div id="anomaliList">
+                    <div class="empty-state">
+                        <div class="empty-icon">📭</div>
+                        <p>Belum ada anomali</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DASHBOARD PAGE -->
+        <div class="page" id="pageDashboard">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value stat-open" id="dashOpen">0</div>
+                    <div class="stat-label">Open</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value stat-progress" id="dashProgress">0</div>
+                    <div class="stat-label">Progress</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value stat-closed" id="dashClosed">0</div>
+                    <div class="stat-label">Closed</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-title">🔴 Tiket Perlu Tindakan</div>
+                <div id="dashboardContent">
+                    <div class="empty-state">
+                        <div class="spinner"></div>
+                        <p>Loading...</p>
+                    </div>
+                </div>
+            </div>
+            
+            <button class="btn btn-primary" onclick="app.refreshDashboard()">🔄 Refresh Data</button>
+        </div>
+    </main>
+
+    <!-- Bottom Navigation -->
+    <nav class="nav-bottom">
+        <button class="nav-item active" onclick="app.navigate('home')">
+            <span class="nav-icon">🏠</span>
+            <span>Home</span>
+        </button>
+        <button class="nav-item" onclick="app.navigate('laporan')">
+            <span class="nav-icon">📝</span>
+            <span>Laporan</span>
+        </button>
+        <button class="nav-item" onclick="app.navigate('anomali')">
+            <span class="nav-icon">⚠️</span>
+            <span>Anomali</span>
+        </button>
+        <button class="nav-item" onclick="app.navigate('dashboard')">
+            <span class="nav-icon">📊</span>
+            <span>Dashboard</span>
+        </button>
+    </nav>
+
+    <!-- Scripts -->
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+    <script>
+        // Initialize App
+        const app = new TurbineApp();
         
-        <div class="mode-selector">
-          <button class="mode-btn active" onclick="app.setMode('TURBINE')">⚡ Turbine</button>
-          <button class="mode-btn" onclick="app.setMode('CT')">🏭 CT</button>
-          <button class="mode-btn" onclick="app.setMode('OLI')">🛢️ Oli</button>
-        </div>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => console.log('SW registered'))
+                .catch(err => console.log('SW error:', err));
+        }
 
-        <form id="logsheetForm" onsubmit="app.saveLogsheet(event)">
-          <div id="logsheetFields">
-            <!-- Dynamic fields injected here -->
-          </div>
-          
-          <button type="submit" class="btn btn-primary" style="margin-top:16px">
-            💾 Simpan Logsheet
-          </button>
-          <button type="button" class="btn btn-secondary" onclick="app.saveDraft()" style="margin-top:8px">
-            📝 Simpan Draft
-          </button>
-        </form>
-      </div>
-    </div>
+        // Global debug function
+        function toggleDebug() {
+            const panel = document.getElementById('debugPanel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            if (panel.style.display === 'block' && window.Debug) Debug.updatePanel();
+        }
 
-    <!-- LAPORAN PAGE -->
-    <div class="page" id="pageLaporan">
-      <div class="card">
-        <div class="card-title">📋 Laporan Shift</div>
-        
-        <form id="laporanForm" onsubmit="app.saveLaporan(event)">
-          <div class="form-group">
-            <label class="form-label">Shift</label>
-            <select class="form-input" name="shift" required>
-              <option value="PAGI">🌅 Pagi (07:00-15:00)</option>
-              <option value="SORE">🌇 Sore (15:00-23:00)</option>
-              <option value="MALAM">🌙 Malam (23:00-07:00)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Area</label>
-            <select class="form-input" name="area" required>
-              <option value="CT">🏭 Cooling Tower</option>
-              <option value="TURBINE">⚡ Turbine</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Detail Pekerjaan</label>
-            <textarea class="form-input" name="detail" rows="4" placeholder="Masukkan detail pekerjaan..." required></textarea>
-          </div>
-
-          <button type="submit" class="btn btn-primary">💾 Simpan Laporan</button>
-        </form>
-      </div>
-    </div>
-
-    <!-- ANOMALI PAGE -->
-    <div class="page" id="pageAnomali">
-      <div class="card">
-        <div class="card-title">⚠️ Buat Anomali</div>
-        
-        <form id="anomaliForm" onsubmit="app.saveAnomali(event)">
-          <div class="form-group">
-            <label class="form-label">ID Tiket (Auto)</label>
-            <input type="text" class="form-input" id="anomaliId" readonly>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Area</label>
-            <select class="form-input" name="area" required>
-              <option value="TURBINE">⚡ Turbine</option>
-              <option value="CT">🏭 Cooling Tower</option>
-              <option value="OLI">🛢️ Oli System</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Deskripsi Anomali</label>
-            <textarea class="form-input" name="description" rows="4" placeholder="Deskripsikan anomali..." required></textarea>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Foto (Optional)</label>
-            <input type="file" class="photo-input" id="photoInput" accept="image/*" capture="environment" onchange="app.previewPhoto(this)">
-            <button type="button" class="photo-btn" onclick="document.getElementById('photoInput').click()">
-              📷 Tap untuk ambil foto
-            </button>
-            <img id="photoPreview" class="photo-preview hidden">
-          </div>
-
-          <button type="submit" class="btn btn-primary">🚨 Simpan Anomali</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="card-title">📋 Daftar Anomali</div>
-        <div id="anomaliList">
-          <div class="empty-state">
-            <div class="empty-icon">📭</div>
-            <p>Belum ada anomali</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </main>
-
-  <!-- Bottom Navigation -->
-  <nav class="nav-bottom">
-    <button class="nav-item active" onclick="app.navigate('home')">
-      <span class="nav-icon">🏠</span>
-      <span>Home</span>
-    </button>
-    <button class="nav-item" onclick="app.navigate('logsheet')">
-      <span class="nav-icon">📝</span>
-      <span>Logsheet</span>
-    </button>
-    <button class="nav-item" onclick="app.navigate('laporan')">
-      <span class="nav-icon">📋</span>
-      <span>Laporan</span>
-    </button>
-    <button class="nav-item" onclick="app.navigate('anomali')">
-      <span class="nav-icon">⚠️</span>
-      <span>Anomali</span>
-    </button>
-  </nav>
-
-  <!-- Scripts -->
-  <script src="config.js"></script>
-  <script src="app.js"></script>
-  <script>
-    // Register Service Worker
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js')
-        .then(reg => console.log('SW registered'))
-        .catch(err => console.log('SW error:', err));
-    }
-  </script>
+        function testApiConnection() {
+            app.testConnection();
+        }
+    </script>
 </body>
 </html>
