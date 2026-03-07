@@ -64,6 +64,7 @@ class TurbineApp {
         this.paramData = {};
         this.dbInitialized = false;
         
+        // Data areas (sama dengan GAS)
         this.AREAS_DATA = {
             TURBINE: {
                 "Steam Inlet Turbine": [
@@ -318,7 +319,6 @@ class TurbineApp {
         return new Promise((resolve, reject) => {
             Debug.info('Opening IndexedDB...');
             
-            // Cek dukungan IndexedDB
             if (!window.indexedDB) {
                 reject(new Error('Browser tidak mendukung IndexedDB'));
                 return;
@@ -334,12 +334,9 @@ class TurbineApp {
             
             request.onsuccess = (event) => {
                 this.db = event.target.result;
-                
-                // Handle error saat operasi DB
                 this.db.onerror = (event) => {
                     Debug.error('Database error', event.target.error);
                 };
-                
                 Debug.info('IndexedDB opened successfully');
                 resolve();
             };
@@ -348,7 +345,6 @@ class TurbineApp {
                 Debug.info('Upgrading IndexedDB schema...');
                 const db = event.target.result;
                 
-                // Hapus object store lama jika ada (untuk clean slate)
                 if (db.objectStoreNames.contains('pending')) {
                     db.deleteObjectStore('pending');
                 }
@@ -356,13 +352,10 @@ class TurbineApp {
                     db.deleteObjectStore('drafts');
                 }
                 
-                // Buat object store baru
                 const pendingStore = db.createObjectStore('pending', { 
                     keyPath: 'id', 
                     autoIncrement: true 
                 });
-                
-                // Buat index untuk pencarian
                 pendingStore.createIndex('timestamp', 'timestamp', { unique: false });
                 pendingStore.createIndex('type', 'type', { unique: false });
                 
@@ -424,7 +417,7 @@ class TurbineApp {
         if (!container) return;
         container.innerHTML = '';
         
-        Object.keys(areas).forEach((areaName, index) => {
+        Object.keys(areas).forEach((areaName) => {
             const div = document.createElement('div');
             div.className = 'area-item';
             div.innerHTML = `
@@ -456,24 +449,20 @@ class TurbineApp {
         const total = this.currentParams.length;
         const progress = ((this.currentParamIndex / total) * 100).toFixed(0);
         
-        // Update counter dan progress
         const counterEl = document.getElementById('inputCounter');
         if (counterEl) counterEl.textContent = `Parameter ${this.currentParamIndex + 1}/${total}`;
         
         const progressEl = document.getElementById('inputProgress');
         if (progressEl) progressEl.style.width = progress + '%';
         
-        // Update param name
         const nameEl = document.getElementById('paramName');
         if (nameEl) nameEl.textContent = param;
         
-        // Extract unit dari nama parameter (yang ada dalam kurung)
         const unitMatch = param.match(/\(([^)]+)\)$/);
         const unit = unitMatch ? unitMatch[1] : '-';
         const unitEl = document.getElementById('paramUnit');
         if (unitEl) unitEl.textContent = unit;
         
-        // Load previous value jika ada
         const prevValue = this.paramData[param] || this.getPreviousValue(param);
         const inputEl = document.getElementById('paramInput');
         if (inputEl) {
@@ -486,11 +475,9 @@ class TurbineApp {
             prevEl.textContent = prevValue ? `Data sebelumnya: ${prevValue}` : 'Data sebelumnya: -';
         }
         
-        // Reset error
         const errorEl = document.getElementById('paramError');
         if (errorEl) errorEl.classList.remove('show');
         
-        // Show/hide quick actions berdasarkan tipe parameter
         const quickActions = document.getElementById('quickActions');
         if (quickActions) {
             const hasQuickOptions = param.includes('(On/Off)') || 
@@ -500,7 +487,6 @@ class TurbineApp {
             quickActions.style.display = hasQuickOptions ? 'flex' : 'none';
         }
         
-        // Focus input
         setTimeout(() => {
             const input = document.getElementById('paramInput');
             if (input) input.focus();
@@ -522,7 +508,6 @@ class TurbineApp {
         const input = document.getElementById('paramInput');
         const value = input ? input.value.trim() : '';
         
-        // Validation
         if (!value) {
             if (input) input.classList.add('error');
             const errorEl = document.getElementById('paramError');
@@ -531,10 +516,8 @@ class TurbineApp {
             return;
         }
         
-        // Simpan nilai
         this.paramData[param] = value;
         
-        // Cek abnormal values
         const errKeywords = ["RUSAK", "BROKEN", "MATI", "LEAK", "ERROR", "UPPER", "KERUSAKAN", "ABNORMAL"];
         const isAbnormal = errKeywords.some(k => value.toUpperCase().includes(k));
         
@@ -542,7 +525,6 @@ class TurbineApp {
             this.savePendingAnomali(param, value);
         }
         
-        // Next atau save
         this.currentParamIndex++;
         
         if (this.currentParamIndex >= this.currentParams.length) {
@@ -614,13 +596,12 @@ class TurbineApp {
         this.loadAnomaliList();
     }
 
-    // ================== PERBAIKAN UTAMA: SAVE TO LOCAL ==================
+    // ================== API & SYNC ==================
     async saveToApiOrQueue(payload, typeName) {
         this.showLoading(true);
         Debug.info(`Saving ${typeName}...`, payload);
         
         try {
-            // Cek koneksi
             if (navigator.onLine) {
                 Debug.info('Online mode - attempting API sync');
                 const result = await this.syncWithRetry(payload);
@@ -638,7 +619,6 @@ class TurbineApp {
         } catch (error) {
             Debug.error(`API save failed: ${error.message}. Falling back to local queue.`);
             
-            // Fallback ke local queue
             try {
                 await this.queueForSync(payload);
                 this.showToast(`⚠️ ${typeName} disimpan lokal (akan sync nanti)`, 'warning');
@@ -656,11 +636,58 @@ class TurbineApp {
         }
     }
 
-    // ================== PERBAIKAN UTAMA: QUEUE FOR SYNC ==================
+    // ================== PERBAIKAN: SYNC WITH RETRY ==================
+    async syncWithRetry(data, attempt = 1) {
+        try {
+            Debug.info(`API call attempt ${attempt}/${CONFIG.MAX_RETRIES}...`);
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), CONFIG.TIMEOUT);
+
+            // Gunakan POST dengan JSON payload (sesuai GAS doPost)
+            const response = await fetch(CONFIG.GAS_URL, {
+                method: 'POST',
+                redirect: 'follow', // Penting untuk GAS redirect
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            Debug.info('API Response:', result);
+            
+            // Cek status dari GAS
+            if (result.status === 'error') {
+                throw new Error(result.message || 'API returned error status');
+            }
+            
+            return { success: true, data: result };
+
+        } catch (error) {
+            Debug.error(`Attempt ${attempt} failed: ${error.message}`);
+            
+            if (attempt < CONFIG.MAX_RETRIES) {
+                const delay = CONFIG.RETRY_DELAY * attempt;
+                Debug.info(`Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+                return this.syncWithRetry(data, attempt + 1);
+            }
+            
+            return { success: false, error: error.message };
+        }
+    }
+
     async queueForSync(data) {
         Debug.info('Queueing data for sync...', { type: data.type, timestamp: data.timestamp });
         
-        // Cek apakah DB sudah diinisialisasi
         if (!this.dbInitialized || !this.db) {
             Debug.error('Database not initialized, attempting re-init...');
             try {
@@ -675,7 +702,6 @@ class TurbineApp {
                 const tx = this.db.transaction(['pending'], 'readwrite');
                 const store = tx.objectStore('pending');
                 
-                // Tambahkan metadata
                 const record = {
                     data: data,
                     created: new Date().toISOString(),
@@ -717,38 +743,6 @@ class TurbineApp {
         });
     }
 
-    async syncWithRetry(data, attempt = 1) {
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), CONFIG.TIMEOUT);
-
-            const response = await fetch(CONFIG.GAS_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data),
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            
-            const result = await response.json();
-            if (result.status === 'error') throw new Error(result.message);
-            
-            return { success: true, data: result };
-
-        } catch (error) {
-            if (attempt < CONFIG.MAX_RETRIES) {
-                Debug.info(`Retry ${attempt}/${CONFIG.MAX_RETRIES} after ${CONFIG.RETRY_DELAY * attempt}ms`);
-                await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * attempt));
-                return this.syncWithRetry(data, attempt + 1);
-            }
-            return { success: false, error: error.message };
-        }
-    }
-
-    // ================== PERBAIKAN: SYNC DATA ==================
     async syncData() {
         if (!navigator.onLine) {
             this.showToast('📴 Tidak ada koneksi!', 'error');
@@ -784,13 +778,11 @@ class TurbineApp {
                     const result = await this.syncWithRetry(item.data);
                     
                     if (result.success) {
-                        // Hapus dari queue jika sukses
                         const delTx = this.db.transaction(['pending'], 'readwrite');
                         delTx.objectStore('pending').delete(item.id);
                         success++;
                         Debug.success(`Item ${item.id} synced and removed from queue`);
                     } else {
-                        // Update retry count
                         const updateTx = this.db.transaction(['pending'], 'readwrite');
                         const updateStore = updateTx.objectStore('pending');
                         item.retries = (item.retries || 0) + 1;
@@ -818,22 +810,56 @@ class TurbineApp {
         };
     }
 
+    // ================== TEST CONNECTION ==================
     async testConnection() {
         this.showToast('🧪 Testing API...', 'info');
         Debug.info('Testing API connection...');
         
         try {
-            const response = await fetch(`${CONFIG.GAS_URL}?action=test`);
+            // Test dengan POST request sederhana
+            const testPayload = {
+                type: 'TEST',
+                timestamp: new Date().toISOString()
+            };
+            
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            const response = await fetch(CONFIG.GAS_URL, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(testPayload),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
             const result = await response.json();
-            Debug.success('API connected', result);
+            Debug.success('API test successful', result);
+            
             const statusEl = document.getElementById('debugStatus');
             if (statusEl) statusEl.textContent = '✅ Connected';
             this.showToast('✅ API Connected!', 'success');
+            
         } catch (err) {
             Debug.error('API test failed', err.message);
+            
             const statusEl = document.getElementById('debugStatus');
-            if (statusEl) statusEl.textContent = '❌ Failed';
-            this.showToast('❌ API Error: ' + err.message, 'error');
+            if (statusEl) statusEl.textContent = '❌ Failed: ' + err.message;
+            
+            let errorMsg = '❌ API Error: ' + err.message;
+            if (err.message.includes('Failed to fetch')) {
+                errorMsg += ' (CORS/Network issue - pastikan URL GAS benar)';
+            }
+            
+            this.showToast(errorMsg, 'error');
         }
     }
 
@@ -864,20 +890,35 @@ class TurbineApp {
     }
 
     getPreviousValue(param) {
-        // Implementasi sederhana - bisa diperluas dengan IndexedDB
         return null;
     }
 
     savePendingAnomali(param, value) {
         Debug.info('Abnormal value detected', { param, value });
-        // Simpan untuk ditampilkan di dashboard
     }
 
     async loadAnomaliList() {
         try {
-            const response = await fetch(`${CONFIG.GAS_URL}?action=getAnomali`);
-            const data = await response.json();
-            this.renderAnomaliList(data);
+            // Gunakan POST untuk getAnomali juga (lebih reliable dengan GAS)
+            const response = await fetch(CONFIG.GAS_URL, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'GET_ANOMALI' })
+            });
+            
+            const result = await response.json();
+            if (result.status === 'success' && result.result) {
+                this.renderAnomaliList(result.result);
+            } else {
+                // Fallback ke GET jika POST tidak support
+                const getResponse = await fetch(`${CONFIG.GAS_URL}?action=getAnomali`, {
+                    method: 'GET',
+                    redirect: 'follow'
+                });
+                const data = await getResponse.json();
+                this.renderAnomaliList(data);
+            }
         } catch (err) {
             Debug.error('Load anomali failed', err.message);
         }
@@ -915,57 +956,36 @@ class TurbineApp {
 
     async refreshDashboard() {
         try {
-            const response = await fetch(`${CONFIG.GAS_URL}?action=getDashboard`);
-            const data = await response.json();
+            const response = await fetch(CONFIG.GAS_URL, {
+                method: 'POST',
+                redirect: 'follow',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'GET_DASHBOARD' })
+            });
             
-            const openEl = document.getElementById('dashOpen');
-            const progressEl = document.getElementById('dashProgress');
-            const closedEl = document.getElementById('dashClosed');
+            const result = await response.json();
+            if (result.status === 'success' && result.result) {
+                const data = result.result;
+                const openEl = document.getElementById('dashOpen');
+                const progressEl = document.getElementById('dashProgress');
+                const closedEl = document.getElementById('dashClosed');
+                
+                if (openEl) openEl.textContent = data.open || 0;
+                if (progressEl) progressEl.textContent = data.progress || 0;
+                if (closedEl) closedEl.textContent = data.closed || 0;
+            }
             
-            if (openEl) openEl.textContent = data.open || 0;
-            if (progressEl) progressEl.textContent = data.progress || 0;
-            if (closedEl) closedEl.textContent = data.closed || 0;
-            
-            // Load ticket list
-            const ticketsRes = await fetch(`${CONFIG.GAS_URL}?action=getAnomali`);
-            const tickets = await ticketsRes.json();
-            this.renderDashboardTickets(tickets);
+            this.loadAnomaliList();
             
         } catch (err) {
             Debug.error('Dashboard refresh failed', err.message);
         }
     }
 
-    renderDashboardTickets(tickets) {
-        const container = document.getElementById('dashboardContent');
-        if (!container) return;
-        
-        const activeTickets = tickets.filter(t => t.status !== 'CLOSED').slice(0, 5);
-        
-        if (activeTickets.length === 0) {
-            container.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>Semua tiket selesai</p></div>';
-            return;
-        }
-        
-        container.innerHTML = activeTickets.map(t => `
-            <div class="anomali-item" style="margin-bottom: 12px;">
-                <div class="anomali-header">
-                    <span class="anomali-id">${t.id}</span>
-                    <span class="status-badge status-${(t.status || 'OPEN').toLowerCase().replace(' ', '-')}">
-                        ${t.status || 'OPEN'}
-                    </span>
-                </div>
-                <div class="anomali-desc">${t.description}</div>
-            </div>
-        `).join('');
-    }
-
-    // ================== PERBAIKAN: UPDATE STATUS ==================
     updateStatus() {
         const onlineEl = document.getElementById('onlineStatus');
         if (onlineEl) onlineEl.textContent = navigator.onLine ? '✅ Online' : '❌ Offline';
         
-        // Cek DB status
         if (!this.dbInitialized || !this.db) {
             const pendingEl = document.getElementById('pendingCount');
             if (pendingEl) pendingEl.textContent = 'DB Error';
