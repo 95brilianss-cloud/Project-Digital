@@ -3,7 +3,7 @@
 const CONFIG = {
     // URL Web App dari Google Apps Script (Deploy → Web app)
     // 🔴 PASTIKAN TIDAK ADA SPASI SETELAH /exec
-    GAS_URL: 'https://script.google.com/macros/s/AKfycbx2uj3lIFQFKHV4TEDFN-7H1wK6d6IO6-g80S0HOBgVCYIiAF0z7pfpBRTncPO0geFK/exec',
+    GAS_URL: 'https://script.google.com/macros/s/AKfycbybJ1aIk6kkCnTaiG0rXQwe5GY8I-7E6Sb0_2BvZTRmw3iku_ijhz-Yg9ffNzr3YHOY/exec',
     
     MAX_RETRIES: 3,
     RETRY_DELAY: 2000,
