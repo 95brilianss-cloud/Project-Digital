@@ -271,7 +271,6 @@ class TurbineApp {
             const urlEl = document.getElementById('debugApiUrl');
             if (urlEl) urlEl.textContent = CONFIG.GAS_URL.substring(0, 50) + '...';
             
-            // Inisialisasi DB dengan retry
             await this.initDBWithRetry();
             
             this.generateAnomaliId();
@@ -297,7 +296,6 @@ class TurbineApp {
         }
     }
 
-    // Inisialisasi DB dengan retry mechanism
     async initDBWithRetry(maxRetries = 3) {
         for (let i = 0; i < maxRetries; i++) {
             try {
@@ -402,7 +400,6 @@ class TurbineApp {
         window.scrollTo(0, 0);
     }
 
-    // ================== AREA SELECTION ==================
     showAreaSelection(mode) {
         this.currentMode = mode;
         const areas = this.AREAS_DATA[mode];
@@ -443,7 +440,6 @@ class TurbineApp {
         this.navigate('input');
     }
 
-    // ================== PARAMETER INPUT ==================
     showParameter() {
         const param = this.currentParams[this.currentParamIndex];
         const total = this.currentParams.length;
@@ -543,7 +539,6 @@ class TurbineApp {
         }
     }
 
-    // ================== SAVE FUNCTIONS ==================
     async saveLogsheet() {
         const payload = {
             type: 'LOGSHEET',
@@ -596,7 +591,6 @@ class TurbineApp {
         this.loadAnomaliList();
     }
 
-    // ================== API & SYNC ==================
     async saveToApiOrQueue(payload, typeName) {
         this.showLoading(true);
         Debug.info(`Saving ${typeName}...`, payload);
@@ -644,10 +638,9 @@ class TurbineApp {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), CONFIG.TIMEOUT);
 
-            // Gunakan POST dengan JSON payload (sesuai GAS doPost)
             const response = await fetch(CONFIG.GAS_URL, {
                 method: 'POST',
-                redirect: 'follow', // Penting untuk GAS redirect
+                redirect: 'follow',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -664,12 +657,16 @@ class TurbineApp {
             const result = await response.json();
             Debug.info('API Response:', result);
             
-            // Cek status dari GAS
+            // Handle GAS response format: {status, result, timestamp}
             if (result.status === 'error') {
                 throw new Error(result.message || 'API returned error status');
             }
             
-            return { success: true, data: result };
+            // Return dalam format yang konsisten
+            return { 
+                success: true, 
+                data: result.result || result // Handle both formats
+            };
 
         } catch (error) {
             Debug.error(`Attempt ${attempt} failed: ${error.message}`);
@@ -810,28 +807,19 @@ class TurbineApp {
         };
     }
 
-    // ================== TEST CONNECTION ==================
+    // ================== PERBAIKAN: TEST CONNECTION ==================
     async testConnection() {
         this.showToast('🧪 Testing API...', 'info');
         Debug.info('Testing API connection...');
         
         try {
-            // Test dengan POST request sederhana
-            const testPayload = {
-                type: 'TEST',
-                timestamp: new Date().toISOString()
-            };
-            
+            // Test dengan GET request (sesuai response yang berhasil)
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000);
             
-            const response = await fetch(CONFIG.GAS_URL, {
-                method: 'POST',
+            const response = await fetch(`${CONFIG.GAS_URL}?action=test`, {
+                method: 'GET',
                 redirect: 'follow',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(testPayload),
                 signal: controller.signal
             });
             
@@ -844,26 +832,51 @@ class TurbineApp {
             const result = await response.json();
             Debug.success('API test successful', result);
             
+            // Handle GAS response format
+            const message = result.result?.message || result.message || 'Connected';
+            const version = result.result?.version || result.version || 'unknown';
+            
             const statusEl = document.getElementById('debugStatus');
-            if (statusEl) statusEl.textContent = '✅ Connected';
-            this.showToast('✅ API Connected!', 'success');
+            if (statusEl) statusEl.textContent = `✅ ${message} (v${version})`;
+            
+            this.showToast(`✅ API Connected! ${message}`, 'success');
             
         } catch (err) {
             Debug.error('API test failed', err.message);
             
-            const statusEl = document.getElementById('debugStatus');
-            if (statusEl) statusEl.textContent = '❌ Failed: ' + err.message;
-            
-            let errorMsg = '❌ API Error: ' + err.message;
-            if (err.message.includes('Failed to fetch')) {
-                errorMsg += ' (CORS/Network issue - pastikan URL GAS benar)';
+            // Coba dengan POST sebagai fallback
+            Debug.info('Trying POST fallback...');
+            try {
+                const postResponse = await fetch(CONFIG.GAS_URL, {
+                    method: 'POST',
+                    redirect: 'follow',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'TEST' })
+                });
+                
+                const postResult = await postResponse.json();
+                Debug.success('POST test successful', postResult);
+                
+                const statusEl = document.getElementById('debugStatus');
+                if (statusEl) statusEl.textContent = '✅ Connected (POST)';
+                this.showToast('✅ API Connected via POST!', 'success');
+                
+            } catch (postErr) {
+                Debug.error('POST also failed', postErr.message);
+                
+                const statusEl = document.getElementById('debugStatus');
+                if (statusEl) statusEl.textContent = '❌ Failed: ' + err.message;
+                
+                let errorMsg = '❌ API Error: ' + err.message;
+                if (err.message.includes('Failed to fetch')) {
+                    errorMsg += ' (CORS/Network)';
+                }
+                
+                this.showToast(errorMsg, 'error');
             }
-            
-            this.showToast(errorMsg, 'error');
         }
     }
 
-    // ================== HELPER FUNCTIONS ==================
     generateAnomaliId() {
         const id = 'ANM-' + Date.now().toString(36).toUpperCase();
         const el = document.getElementById('anomaliId');
@@ -897,30 +910,31 @@ class TurbineApp {
         Debug.info('Abnormal value detected', { param, value });
     }
 
+    // ================== PERBAIKAN: LOAD ANOMALI ==================
     async loadAnomaliList() {
         try {
-            // Gunakan POST untuk getAnomali juga (lebih reliable dengan GAS)
-            const response = await fetch(CONFIG.GAS_URL, {
-                method: 'POST',
-                redirect: 'follow',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'GET_ANOMALI' })
+            // Gunakan GET request (sesuai response yang berhasil)
+            const response = await fetch(`${CONFIG.GAS_URL}?action=getAnomali`, {
+                method: 'GET',
+                redirect: 'follow'
             });
             
             const result = await response.json();
+            Debug.info('Anomali loaded', result);
+            
+            // Handle GAS response format: {status, result, timestamp}
             if (result.status === 'success' && result.result) {
                 this.renderAnomaliList(result.result);
+            } else if (Array.isArray(result)) {
+                // Fallback jika langsung return array
+                this.renderAnomaliList(result);
             } else {
-                // Fallback ke GET jika POST tidak support
-                const getResponse = await fetch(`${CONFIG.GAS_URL}?action=getAnomali`, {
-                    method: 'GET',
-                    redirect: 'follow'
-                });
-                const data = await getResponse.json();
-                this.renderAnomaliList(data);
+                throw new Error('Invalid response format');
             }
         } catch (err) {
             Debug.error('Load anomali failed', err.message);
+            // Render empty state
+            this.renderAnomaliList([]);
         }
     }
 
@@ -954,27 +968,36 @@ class TurbineApp {
         `).join('');
     }
 
+    // ================== PERBAIKAN: REFRESH DASHBOARD ==================
     async refreshDashboard() {
         try {
-            const response = await fetch(CONFIG.GAS_URL, {
-                method: 'POST',
-                redirect: 'follow',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'GET_DASHBOARD' })
+            const response = await fetch(`${CONFIG.GAS_URL}?action=getDashboard`, {
+                method: 'GET',
+                redirect: 'follow'
             });
             
             const result = await response.json();
+            Debug.info('Dashboard loaded', result);
+            
+            // Handle GAS response format
+            let data;
             if (result.status === 'success' && result.result) {
-                const data = result.result;
-                const openEl = document.getElementById('dashOpen');
-                const progressEl = document.getElementById('dashProgress');
-                const closedEl = document.getElementById('dashClosed');
-                
-                if (openEl) openEl.textContent = data.open || 0;
-                if (progressEl) progressEl.textContent = data.progress || 0;
-                if (closedEl) closedEl.textContent = data.closed || 0;
+                data = result.result;
+            } else if (result.open !== undefined) {
+                data = result;
+            } else {
+                throw new Error('Invalid response format');
             }
             
+            const openEl = document.getElementById('dashOpen');
+            const progressEl = document.getElementById('dashProgress');
+            const closedEl = document.getElementById('dashClosed');
+            
+            if (openEl) openEl.textContent = data.open || 0;
+            if (progressEl) progressEl.textContent = data.progress || 0;
+            if (closedEl) closedEl.textContent = data.closed || 0;
+            
+            // Load anomali list juga
             this.loadAnomaliList();
             
         } catch (err) {
