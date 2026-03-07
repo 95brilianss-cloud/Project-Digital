@@ -631,56 +631,58 @@ class TurbineApp {
     }
 
     // ================== PERBAIKAN: SYNC WITH RETRY ==================
-    async syncWithRetry(data, attempt = 1) {
-        try {
-            Debug.info(`API call attempt ${attempt}/${CONFIG.MAX_RETRIES}...`);
-            
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), CONFIG.TIMEOUT);
+   async syncWithRetry(data, attempt = 1) {
+    try {
+        Debug.info(`API call attempt ${attempt}/${CONFIG.MAX_RETRIES}...`);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), CONFIG.TIMEOUT);
 
-            const response = await fetch(CONFIG.GAS_URL, {
-                method: 'POST',
-                redirect: 'follow',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(data),
-                signal: controller.signal
-            });
-
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            
-            const result = await response.json();
-            Debug.info('API Response:', result);
-            
-            // Handle GAS response format: {status, result, timestamp}
-            if (result.status === 'error') {
-                throw new Error(result.message || 'API returned error status');
-            }
-            
-            // Return dalam format yang konsisten
-            return { 
-                success: true, 
-                data: result.result || result // Handle both formats
-            };
-
-        } catch (error) {
-            Debug.error(`Attempt ${attempt} failed: ${error.message}`);
-            
-            if (attempt < CONFIG.MAX_RETRIES) {
-                const delay = CONFIG.RETRY_DELAY * attempt;
-                Debug.info(`Retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-                return this.syncWithRetry(data, attempt + 1);
-            }
-            
-            return { success: false, error: error.message };
+        // SOLUSI: Gunakan FormData (tidak trigger preflight CORS)
+        const formData = new FormData();
+        formData.append('type', data.type);
+        formData.append('data', JSON.stringify(data));
+        
+        // Jika ada foto (base64), masukkan juga
+        if (data.photo) {
+            formData.append('photo', data.photo);
         }
+
+        const response = await fetch(CONFIG.GAS_URL, {
+            method: 'POST',
+            mode: 'cors',
+            // JANGAN set Content-Type header - biarkan browser set otomatis (multipart/form-data)
+            body: formData,
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const result = await response.json();
+        Debug.info('API Response:', result);
+        
+        if (result.status === 'error') {
+            throw new Error(result.message || 'API Error');
+        }
+        
+        return { success: true, data: result.result || result };
+
+    } catch (error) {
+        Debug.error(`Attempt ${attempt} failed: ${error.message}`);
+        
+        if (attempt < CONFIG.MAX_RETRIES) {
+            const delay = CONFIG.RETRY_DELAY * attempt;
+            await new Promise(r => setTimeout(r, delay));
+            return this.syncWithRetry(data, attempt + 1);
+        }
+        
+        return { success: false, error: error.message };
     }
+}
 
     async queueForSync(data) {
         Debug.info('Queueing data for sync...', { type: data.type, timestamp: data.timestamp });
