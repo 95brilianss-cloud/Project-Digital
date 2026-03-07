@@ -1,8 +1,7 @@
 // ================== KONFIGURASI UTAMA ==================
 
 const CONFIG = {
-    // URL Web App dari Google Apps Script (Deploy → Web app)
-    // 🔴 PASTIKAN TIDAK ADA SPASI SETELAH /exec
+    // 🔴 HAPUS SPASI DI AKHIR! Harus: /exec (tanpa spasi)
     GAS_URL: 'https://script.google.com/macros/s/AKfycbybJ1aIk6kkCnTaiG0rXQwe5GY8I-7E6Sb0_2BvZTRmw3iku_ijhz-Yg9ffNzr3YHOY/exec',
     
     MAX_RETRIES: 3,
@@ -10,7 +9,7 @@ const CONFIG = {
     SYNC_INTERVAL: 30000,
     TIMEOUT: 30000,
     DB_NAME: 'TurbineLogDB',
-    APP_VERSION: '3.0.1', // Update versi setelah fix
+    APP_VERSION: '3.0.2', // Update versi setelah fix
     
     DEBUG: true,
     
@@ -25,28 +24,44 @@ const CONFIG = {
     }
 };
 
-// ================== SANITASI & VALIDASI OTOMATIS ==================
-// Hapus spasi/karakter tersembunyi dari URL
-CONFIG.GAS_URL = CONFIG.GAS_URL.trim();
+// ================== SANITASI & VALIDASI ==================
+// Urutan yang benar: Sanitasi dulu, validasi kemudian
 
-// Validasi ketat
+// 1. Hapus semua whitespace (spasi, tab, newline, non-breaking space)
+CONFIG.GAS_URL = CONFIG.GAS_URL.replace(/\s+/g, '');
+
+// 2. Hapus trailing slash berlebihan
+CONFIG.GAS_URL = CONFIG.GAS_URL.replace(/\/+$/, '');
+
+// 3. Validasi URL tidak kosong
 if (!CONFIG.GAS_URL || CONFIG.GAS_URL === '') {
     console.error('❌ FATAL ERROR: GAS_URL kosong!');
     alert('Error: URL GAS belum diisi!');
+    throw new Error('GAS_URL is empty');
 }
 
-if (CONFIG.GAS_URL.includes(' ')) {
-    console.error('❌ FATAL ERROR: GAS_URL mengandung spasi!');
-    alert('Error: URL GAS mengandung spasi. Periksa config.js!');
-    throw new Error('Invalid GAS_URL: contains spaces');
+// 4. Validasi format URL GAS
+if (!CONFIG.GAS_URL.includes('script.google.com')) {
+    console.error('❌ FATAL ERROR: Bukan URL Google Apps Script!');
+    alert('Error: URL bukan dari Google Apps Script!');
+    throw new Error('Invalid GAS_URL domain');
 }
 
-// Pastikan tidak ada trailing slash yang berlebihan
-CONFIG.GAS_URL = CONFIG.GAS_URL.replace(/\/+$/, '');
+// 5. Validasi akhiran .exec
+if (!CONFIG.GAS_URL.endsWith('/exec')) {
+    console.warn('⚠️ WARNING: URL seharusnya diakhiri dengan /exec');
+    // Auto-fix jika ada typo kecil
+    if (CONFIG.GAS_URL.endsWith('/exec/')) {
+        CONFIG.GAS_URL = CONFIG.GAS_URL.slice(0, -1);
+        console.log('✅ Auto-fixed trailing slash');
+    }
+}
 
 // Debug info
 console.log('✅ CONFIG loaded successfully');
 console.log('🔗 GAS_URL:', CONFIG.GAS_URL);
+console.log('🔗 Length:', CONFIG.GAS_URL.length);
+console.log('🔗 Last 10 chars:', CONFIG.GAS_URL.slice(-10)); // Harus berakhir dengan /exec
 console.log('📱 Version:', CONFIG.APP_VERSION);
 
 // Export untuk module
