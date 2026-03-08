@@ -1,18 +1,27 @@
-// ================== KONFIGURASI UTAMA ==================
+/**
+ * KONFIGURASI UTAMA - Turbine Logsheet PWA
+ * Versi: 3.5.0
+ */
 
 const CONFIG = {
-    // 🔴 HAPUS SPASI DI AKHIR! Harus: /exec (tanpa spasi)
+    // URL API dari Google Apps Script Deployment
     GAS_URL: 'https://script.google.com/macros/s/AKfycbwQfOX5Z4yC6Tp2BXEz5EAfif2YxswSZJsVqDxJcBALdL_dpv0MltfKf8rg52PT0gqt/exec',
     
-    MAX_RETRIES: 3,
-    RETRY_DELAY: 2000,
-    SYNC_INTERVAL: 30000,
-    TIMEOUT: 30000,
-    DB_NAME: 'TurbineLogDB',
-    APP_VERSION: '3.0.2', // Update versi setelah fix
+    // Pengaturan Sinkronisasi & Ketahanan Koneksi
+    MAX_RETRIES: 3,             // Maksimal percobaan kirim ulang jika gagal
+    RETRY_DELAY: 3000,          // Jeda waktu (ms) sebelum mencoba lagi
+    SYNC_INTERVAL: 60000,       // Cek data pending setiap 60 detik
+    TIMEOUT: 30000,             // Batas waktu tunggu server (30 detik)
     
+    // Pengaturan Database Lokal (IndexedDB)
+    DB_NAME: 'TurbineLogDB',
+    DB_VERSION: 1,
+    
+    // Metadata Aplikasi
+    APP_VERSION: '3.5.0',
     DEBUG: true,
     
+    // Pemetaan Nama Sheet di Google Spreadsheet
     SHEETS: {
         TURBINE: "Log_TP",
         CT: "Log_CT",
@@ -24,47 +33,51 @@ const CONFIG = {
     }
 };
 
-// ================== SANITASI & VALIDASI ==================
-// Urutan yang benar: Sanitasi dulu, validasi kemudian
+// ================== SANITASI & VALIDASI MESIN ==================
 
-// 1. Hapus semua whitespace (spasi, tab, newline, non-breaking space)
-CONFIG.GAS_URL = CONFIG.GAS_URL.replace(/\s+/g, '');
+(function sanitizeConfig() {
+    try {
+        if (typeof CONFIG.GAS_URL !== 'string') throw "GAS_URL harus berupa string";
 
-// 2. Hapus trailing slash berlebihan
-CONFIG.GAS_URL = CONFIG.GAS_URL.replace(/\/+$/, '');
+        // 1. Bersihkan spasi dan karakter aneh
+        CONFIG.GAS_URL = CONFIG.GAS_URL.trim().replace(/\s+/g, '');
 
-// 3. Validasi URL tidak kosong
-if (!CONFIG.GAS_URL || CONFIG.GAS_URL === '') {
-    console.error('❌ FATAL ERROR: GAS_URL kosong!');
-    alert('Error: URL GAS belum diisi!');
-    throw new Error('GAS_URL is empty');
-}
+        // 2. Koreksi trailing slash
+        CONFIG.GAS_URL = CONFIG.GAS_URL.replace(/\/+$/, '');
 
-// 4. Validasi format URL GAS
-if (!CONFIG.GAS_URL.includes('script.google.com')) {
-    console.error('❌ FATAL ERROR: Bukan URL Google Apps Script!');
-    alert('Error: URL bukan dari Google Apps Script!');
-    throw new Error('Invalid GAS_URL domain');
-}
+        // 3. Validasi Keamanan & Format
+        if (!CONFIG.GAS_URL.startsWith('https://')) {
+            throw "GAS_URL harus menggunakan protokol HTTPS";
+        }
 
-// 5. Validasi akhiran .exec
-if (!CONFIG.GAS_URL.endsWith('/exec')) {
-    console.warn('⚠️ WARNING: URL seharusnya diakhiri dengan /exec');
-    // Auto-fix jika ada typo kecil
-    if (CONFIG.GAS_URL.endsWith('/exec/')) {
-        CONFIG.GAS_URL = CONFIG.GAS_URL.slice(0, -1);
-        console.log('✅ Auto-fixed trailing slash');
+        if (!CONFIG.GAS_URL.includes('script.google.com')) {
+            throw "Domain URL tidak valid (Bukan Google Script)";
+        }
+
+        // 4. Pastikan berakhir dengan /exec
+        if (!CONFIG.GAS_URL.endsWith('/exec')) {
+            // Jika berakhir /exec/ (dengan slash), sudah dibersihkan di step 2
+            // Jika tidak ada /exec sama sekali, tampilkan peringatan keras
+            console.error('❌ CRITICAL: URL tidak berakhir dengan /exec. API mungkin gagal.');
+        }
+
+        if (CONFIG.DEBUG) {
+            console.log(`%c [CONFIG] v${CONFIG.APP_VERSION} Loaded `, 'background: #222; color: #bada55; font-weight: bold;');
+            console.log('Target API:', CONFIG.GAS_URL);
+        }
+
+    } catch (err) {
+        console.error('❌ CONFIG ERROR:', err);
+        // Tampilkan pesan error ke user jika di browser
+        if (typeof window !== 'undefined') {
+            alert('Konfigurasi Aplikasi Rusak: ' + err);
+        }
     }
-}
+})();
 
-// Debug info
-console.log('✅ CONFIG loaded successfully');
-console.log('🔗 GAS_URL:', CONFIG.GAS_URL);
-console.log('🔗 Length:', CONFIG.GAS_URL.length);
-console.log('🔗 Last 10 chars:', CONFIG.GAS_URL.slice(-10)); // Harus berakhir dengan /exec
-console.log('📱 Version:', CONFIG.APP_VERSION);
-
-// Export untuk module
+// Export untuk berbagai lingkungan
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CONFIG;
+} else if (typeof window !== 'undefined') {
+    window.CONFIG = CONFIG;
 }
