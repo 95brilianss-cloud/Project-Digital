@@ -1,14 +1,3 @@
-// ================== KONFIGURASI ==================
-const CONFIG = {
-    // Pastikan URL diakhiri dengan /exec
-    GAS_URL: 'https://script.google.com/macros/s/AKfycbyUAZdKUPO38jeTkD7iTF2cNWg7_0ocaEOhd3GiLIXxPWOgKQMcpgLFdmlbgGejr_1P/exec',
-    MAX_RETRIES: 3,
-    RETRY_DELAY: 2000,
-    DB_NAME: 'TurbineLogDB',
-    APP_VERSION: '3.5.0'
-};
-
-// ================== APP CLASS ==================
 class TurbineApp {
     constructor() {
         this.db = null;
@@ -17,18 +6,18 @@ class TurbineApp {
     }
 
     async init() {
-        console.log(`🚀 TurbineApp v${CONFIG.APP_VERSION} Initializing...`);
         try {
             await this.initDB();
             this.bindEvents();
+            this.setupAutoSync(); // Menjalankan cek periodik
             this.updateUIStatus();
-            // Coba sinkronisasi otomatis saat startup jika online
             if (navigator.onLine) this.syncAll();
         } catch (err) {
-            this.showToast('Gagal inisialisasi database', 'danger');
+            this.showToast('Gagal inisialisasi system', 'danger');
         }
     }
 
+    // --- Database & Sync Logic ---
     async initDB() {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(CONFIG.DB_NAME, 1);
@@ -38,57 +27,43 @@ class TurbineApp {
                     db.createObjectStore('pending', { keyPath: 'id', autoIncrement: true });
                 }
             };
-            request.onsuccess = (e) => {
-                this.db = e.target.result;
-                resolve();
-            };
+            request.onsuccess = (e) => { this.db = e.target.result; resolve(); };
             request.onerror = () => reject();
         });
     }
 
-    bindEvents() {
-        window.addEventListener('online', () => {
-            this.showToast('🌐 Kembali Online. Sinkronisasi...', 'success');
-            this.syncAll();
-        });
-        
-        window.addEventListener('offline', () => {
-            this.showToast('📴 Mode Offline Aktif', 'warning');
-        });
+    setupAutoSync() {
+        setInterval(() => {
+            if (navigator.onLine && !this.isSyncing) this.syncAll();
+        }, CONFIG.SYNC_INTERVAL);
     }
 
-    // 🟢 PERBAIKAN: Gunakan POST untuk keamanan data besar (CORS Handling)
+    // --- Communication Logic ---
     async saveToServer(payload) {
         try {
-            // Google Apps Script memerlukan mode: 'no-cors' jika POST tanpa preflight, 
-            // tapi kita akan gunakan 'cors' karena script GAS kita sudah diset 'Anyone'.
+            // Kita kirim sebagai text/plain agar tidak memicu CORS Preflight
             const response = await fetch(CONFIG.GAS_URL, {
                 method: 'POST',
-                mode: 'cors', 
-                cache: 'no-cache',
-                headers: {
-                    'Content-Type': 'text/plain;charset=utf-8', 
-                    // Menggunakan text/plain menghindari preflight OPTIONS yang sering gagal di GAS
-                },
+                mode: 'no-cors', // Penting untuk Google Apps Script
+                headers: { 'Content-Type': 'text/plain' },
                 body: JSON.stringify(payload)
             });
 
-            const result = await response.json();
-            return { success: result.status === 'success', data: result };
+            // Karena no-cors, kita tidak bisa membaca isi JSON response secara langsung
+            // Namun, jika fetch tidak throw error, kita asumsikan data sampai di server
+            return { success: true }; 
         } catch (error) {
             console.error('Fetch Error:', error);
             return { success: false, error: error.message };
         }
     }
 
-    // ================== LOGIKA PENGIRIMAN ==================
-
-    async handleSubmit(type, data) {
+    async handleSubmit(sheetName, formData) {
         const payload = {
-            type: type,
-            ...data,
-            timestamp: new Date().toISOString(),
-            device_info: navigator.userAgent.slice(0, 50)
+            targetSheet: sheetName, // Misal: CONFIG.SHEETS.TURBINE
+            data: formData,
+            timestamp: new Date().toLocaleString('id-ID'),
+            version: CONFIG.APP_VERSION
         };
 
         this.showLoading(true);
@@ -96,23 +71,18 @@ class TurbineApp {
         if (navigator.onLine) {
             const result = await this.saveToServer(payload);
             if (result.success) {
-                this.showToast('✅ Data terkirim ke Spreadsheet', 'success');
+                this.showToast('✅ Berhasil dikirim ke Cloud', 'success');
                 this.showLoading(false);
                 return true;
             }
         }
 
-        // Jika offline atau gagal kirim, simpan ke IndexedDB
+        // Simpan lokal jika offline atau fetch gagal
         await this.saveLocal(payload);
-        this.showToast('💾 Offline: Data disimpan di memori HP', 'warning');
+        this.showToast('💾 Offline: Tersimpan di Antrean', 'warning');
         this.showLoading(false);
         this.updateUIStatus();
         return true;
-    }
-
-    async saveLocal(payload) {
-        const tx = this.db.transaction('pending', 'readwrite');
-        await tx.objectStore('pending').add(payload);
     }
 
     async syncAll() {
@@ -127,48 +97,21 @@ class TurbineApp {
             return;
         }
 
-        let successCount = 0;
         for (const item of items) {
-            const { id, ...payload } = item; // Pisahkan ID auto-increment
+            const { id, ...payload } = item;
             const result = await this.saveToServer(payload);
             
             if (result.success) {
                 const delTx = this.db.transaction('pending', 'readwrite');
                 await delTx.objectStore('pending').delete(id);
-                successCount++;
             }
         }
 
-        if (successCount > 0) {
-            this.showToast(`🔄 ${successCount} data tersinkronisasi`, 'success');
-            this.updateUIStatus();
-        }
+        this.updateUIStatus();
         this.isSyncing = false;
     }
 
-    // ================== UI CONTROL ==================
-
-    updateUIStatus() {
-        const tx = this.db.transaction('pending', 'readonly');
-        const request = tx.objectStore('pending').count();
-        request.onsuccess = () => {
-            const count = request.result;
-            const badge = document.getElementById('pendingBadge');
-            const countText = document.getElementById('pendingCount');
-            
-            if (badge) {
-                badge.textContent = count;
-                badge.classList.toggle('hidden', count === 0);
-            }
-            if (countText) countText.textContent = `${count} item pending`;
-        };
-    }
-
-    showLoading(status) {
-        const loader = document.getElementById('loadingOverlay');
-        if (loader) loader.style.display = status ? 'flex' : 'none';
-    }
-
+    // --- UI Helpers ---
     showToast(msg, type) {
         const toast = document.getElementById('toast');
         if (!toast) return;
@@ -176,4 +119,25 @@ class TurbineApp {
         toast.className = `toast show ${type}`;
         setTimeout(() => toast.className = 'toast', 3000);
     }
+
+    updateUIStatus() {
+        const tx = this.db.transaction('pending', 'readonly');
+        const req = tx.objectStore('pending').count();
+        req.onsuccess = () => {
+            const el = document.getElementById('pendingCount');
+            if (el) el.textContent = req.result > 0 ? `${req.result} tertunda` : 'Sinkron';
+        };
+    }
+
+    showLoading(show) {
+        const loader = document.getElementById('loader');
+        if (loader) loader.style.display = show ? 'block' : 'none';
+    }
+
+    bindEvents() {
+        window.addEventListener('online', () => this.syncAll());
+    }
 }
+
+// Inisialisasi
+const App = new TurbineApp();
